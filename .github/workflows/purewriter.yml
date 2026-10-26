@@ -45,6 +45,16 @@ jobs:
           java-version: '17'
           architecture: x64
 
+      # Build with JDK 8 like upstream: CMake looks for 'javah' in /usr/bin as well, and the macOS stub there only
+      # works when a JDK 8 is installed. With JDK 8 in JAVA_JDK, its own javah is found first.
+      - name: Set up arm64 JDK 8 (build)
+        id: jdk8
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: zulu
+          java-version: '8'
+          architecture: aarch64
+
       - name: Set up arm64 JDK 17
         id: jdk-arm64
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -55,7 +65,7 @@ jobs:
 
       - name: Build universal dylib and jars
         env:
-          JDK: ${{ steps.jdk-arm64.outputs.path }}
+          JDK: ${{ steps.jdk8.outputs.path }}
         run: |
           set -eux
           cmake --version | head -1
@@ -145,9 +155,13 @@ jobs:
           export PATH="$(cygpath -u "$MSYS2_LOCATION")/mingw64/bin:$PATH"
           cmake --version | head -1
           gcc --version | head -1
+          # -fno-devirtualize-speculatively: GCC's speculative devirtualization compares vtable pointers with the
+          # vtables of 7-Zip classes whose methods are not linked into the library (COpenCallbackImp,
+          # CArchiveExtractCallback from the 7-Zip UI headers), which fails to link with "undefined reference to
+          # vtable".
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DMINGW64=Yes \
             -DJAVA_SYSTEM=Windows -DJAVA_ARCH=amd64 -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
-            -DJAVA_JDK="$JAVA_HOME"
+            -DCMAKE_CXX_FLAGS=-fno-devirtualize-speculatively -DJAVA_JDK="$JAVA_HOME"
           cmake --build build --parallel 4
           objdump -p build/jbinding-cpp/lib7-Zip-JBinding.dll | grep "DLL Name" | tee build/dll-imports.txt
           # The DLL must not need the MinGW runtime DLLs: users do not have them.
