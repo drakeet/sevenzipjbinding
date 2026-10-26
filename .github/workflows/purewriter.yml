@@ -1,10 +1,11 @@
 name: Pure Writer desktop artifacts
 
-# Builds the platform jars that Pure Writer desktop ships: one universal macOS jar (x86_64 + arm64 in a single
-# "Mac" platform, as upstream does) and a Windows x64 jar built with MinGW-w64. Every job runs a smoke test with the
-# jars it built (.github/purewriter/smoke.py): compress a multi-member archive with level 5, a 1 MiB dictionary and
-# solid mode off, extract it again byte for byte, and check the format with py7zr. The macOS jar is smoke tested with
-# an arm64 JVM and with an x86_64 JVM under Rosetta 2.
+# Builds the platform jars that Pure Writer desktop ships: one macOS jar per architecture (x86_64 and arm64, each
+# with a single-architecture dylib; CMake names the platform "Mac" either way) and a Windows x64 jar built with
+# MinGW-w64. All of them are shipped with one Java jar, the one built for macOS arm64, and every platform jar is smoke
+# tested together with it (.github/purewriter/smoke.py): compress a multi-member archive with level 5, a 1 MiB
+# dictionary and solid mode off, extract it again byte for byte, and check the format with py7zr. The arm64 jar runs
+# with an arm64 JVM, the x86_64 jar with an x86_64 JVM under Rosetta 2.
 #
 # Runs on pushes to the purewriter-* release branches and pw-* tags, or manually. Read-only token, no secrets;
 # actions are pinned to commit SHAs.
@@ -19,7 +20,7 @@ permissions:
 
 jobs:
   mac:
-    name: macOS universal (x86_64 + arm64)
+    name: macOS x86_64 and arm64
     runs-on: macos-14
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,49 +64,57 @@ jobs:
           java-version: '17'
           architecture: aarch64
 
-      - name: Build universal dylib and jars
+      - name: Build one dylib and platform jar per architecture
         env:
           JDK: ${{ steps.jdk8.outputs.path }}
         run: |
           set -eux
           cmake --version | head -1
           clang --version | head -1
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=FALSE -DBUILD_TESTING=OFF \
-            -DJAVA_SYSTEM=Mac "-DJAVA_ARCH=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-            -DJAVA_JDK="$JDK"
-          cmake --build build --parallel 3
-          lipo build/jbinding-cpp/lib7-Zip-JBinding.dylib -verify_arch x86_64 arm64
-          vtool -show-build build/jbinding-cpp/lib7-Zip-JBinding.dylib
-          unzip -l build/sevenzipjbinding-Mac.jar
+          for arch in x86_64 arm64; do
+            cmake -S . -B "build-$arch" -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=FALSE -DBUILD_TESTING=OFF \
+              -DJAVA_SYSTEM=Mac -DJAVA_ARCH="$arch" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 -DJAVA_JDK="$JDK"
+            cmake --build "build-$arch" --parallel 3
+            test "$(lipo -archs "build-$arch/jbinding-cpp/lib7-Zip-JBinding.dylib")" = "$arch"
+            vtool -show-build "build-$arch/jbinding-cpp/lib7-Zip-JBinding.dylib"
+            unzip -l "build-$arch/sevenzipjbinding-Mac.jar"
+          done
 
-      - name: Smoke test with arm64 JVM and x86_64 JVM
+      - name: Smoke test, arm64 with arm64 JVM and x86_64 with x86_64 JVM
         env:
           JDK_ARM64: ${{ steps.jdk-arm64.outputs.path }}
           JDK_X64: ${{ steps.jdk-x64.outputs.path }}
         run: |
           set -eux
+          java_jar=build-arm64/jbinding-java/sevenzipjbinding.jar
           mkdir -p smoke/classes
-          "$JDK_ARM64/bin/javac" --release 8 -cp build/jbinding-java/sevenzipjbinding.jar -d smoke/classes \
-            .github/purewriter/PureWriterSmoke.java
-          classpath="smoke/classes:build/jbinding-java/sevenzipjbinding.jar:build/sevenzipjbinding-Mac.jar"
-          python .github/purewriter/smoke.py --java "$JDK_ARM64/bin/java" --classpath "$classpath" \
+          "$JDK_ARM64/bin/javac" --release 8 -cp "$java_jar" -d smoke/classes .github/purewriter/PureWriterSmoke.java
+          python .github/purewriter/smoke.py --java "$JDK_ARM64/bin/java" \
+            --classpath "smoke/classes:$java_jar:build-arm64/sevenzipjbinding-Mac.jar" \
             --work smoke/arm64 --expect-arch aarch64 --report smoke/mac-arm64.json
-          python .github/purewriter/smoke.py --java "$JDK_X64/bin/java" --classpath "$classpath" \
+          python .github/purewriter/smoke.py --java "$JDK_X64/bin/java" \
+            --classpath "smoke/classes:$java_jar:build-x86_64/sevenzipjbinding-Mac.jar" \
             --work smoke/x86_64 --expect-arch x86_64 --report smoke/mac-x86_64.json
 
       - name: Collect artifacts
         run: |
           set -eux
-          mkdir dist
-          cp build/jbinding-java/sevenzipjbinding.jar build/sevenzipjbinding-Mac.jar dist/
-          cd dist
-          shasum -a 256 *.jar > SHA256SUMS
-          cat SHA256SUMS
+          for arch in x86_64 arm64; do
+            mkdir -p "dist/$arch"
+            cp build-arm64/jbinding-java/sevenzipjbinding.jar "build-$arch/sevenzipjbinding-Mac.jar" "dist/$arch/"
+            (cd "dist/$arch" && shasum -a 256 *.jar > SHA256SUMS && cat SHA256SUMS)
+          done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-mac
-          path: dist/
+          name: desktop-mac-x86_64
+          path: dist/x86_64/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-mac-arm64
+          path: dist/arm64/
           if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -116,6 +125,8 @@ jobs:
 
   windows:
     name: Windows x64 (MinGW-w64)
+    # Needs the Java jar of the macOS arm64 build: the Windows jar is smoke tested and shipped with the same one.
+    needs: mac
     runs-on: windows-2025
     defaults:
       run:
@@ -170,13 +181,19 @@ jobs:
           if grep -qiE "libgcc|libstdc|libwinpthread" build/dll-imports.txt; then exit 1; fi
           unzip -l build/sevenzipjbinding-Windows-amd64.jar
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-mac-arm64
+          path: mac-arm64
+
       - name: Smoke test
         run: |
           set -eux
+          (cd mac-arm64 && sha256sum -c SHA256SUMS)
           mkdir -p smoke/classes
-          "$JAVA_HOME/bin/javac" --release 8 -cp build/jbinding-java/sevenzipjbinding.jar -d smoke/classes \
+          "$JAVA_HOME/bin/javac" --release 8 -cp mac-arm64/sevenzipjbinding.jar -d smoke/classes \
             .github/purewriter/PureWriterSmoke.java
-          classpath="smoke/classes;build/jbinding-java/sevenzipjbinding.jar;build/sevenzipjbinding-Windows-amd64.jar"
+          classpath="smoke/classes;mac-arm64/sevenzipjbinding.jar;build/sevenzipjbinding-Windows-amd64.jar"
           python .github/purewriter/smoke.py --java "$JAVA_HOME/bin/java" --classpath "$classpath" \
             --work smoke/windows --expect-arch amd64 --report smoke/windows-amd64.json
 
@@ -184,7 +201,7 @@ jobs:
         run: |
           set -eux
           mkdir dist
-          cp build/jbinding-java/sevenzipjbinding.jar build/sevenzipjbinding-Windows-amd64.jar dist/
+          cp mac-arm64/sevenzipjbinding.jar build/sevenzipjbinding-Windows-amd64.jar dist/
           cd dist
           sha256sum *.jar > SHA256SUMS
           cat SHA256SUMS
