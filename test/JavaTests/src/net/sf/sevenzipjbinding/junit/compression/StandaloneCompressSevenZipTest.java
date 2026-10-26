@@ -17,6 +17,7 @@ import net.sf.sevenzipjbinding.IOutCreateArchive7z;
 import net.sf.sevenzipjbinding.IOutCreateCallback;
 import net.sf.sevenzipjbinding.IOutItem7z;
 import net.sf.sevenzipjbinding.ISequentialInStream;
+import net.sf.sevenzipjbinding.PropID;
 import net.sf.sevenzipjbinding.SevenZip;
 import net.sf.sevenzipjbinding.SevenZipException;
 import net.sf.sevenzipjbinding.impl.OutItemFactory;
@@ -137,6 +138,43 @@ public class StandaloneCompressSevenZipTest extends JUnitNativeTestBase<VoidCont
         byteArrayStream.rewind();
         IInArchive inArchive = closeLater(SevenZip.openInArchive(ArchiveFormat.SEVEN_ZIP, byteArrayStream, PASSWORD));
         virtualContent.verifyInArchive(inArchive, PASSWORD);
+    }
+
+    @Test
+    public void testDictionarySizeWithOtherFeatures() throws Exception {
+        virtualContent = new VirtualContent(new VirtualContentConfiguration());
+        // Every file is larger than the dictionary, so 7-Zip has no reason to use a smaller one.
+        virtualContent.fillRandomly(4, 1, 1, 100000, 50000, null, false);
+
+        ByteArrayStream byteArrayStream = new ByteArrayStream(1000000);
+        IOutCreateArchive7z outArchive = closeLater(SevenZip.openOutArchive7z());
+
+        // The dictionary size must be retained together with all other properties: 7-Zip resets every
+        // property on each ISetProperties.SetProperties() call.
+        outArchive.setLevel(5);
+        outArchive.setDictionarySize(1 << 16);
+        outArchive.setSolid(false);
+        outArchive.setThreadCount(2);
+
+        outArchive.createArchive(byteArrayStream, virtualContent.getItemCount(),
+                callbackTesterCreateArchive.getProxyInstance());
+        outArchive.close();
+
+        byteArrayStream.rewind();
+        IInArchive inArchive = closeLater(SevenZip.openInArchive(ArchiveFormat.SEVEN_ZIP, byteArrayStream));
+        virtualContent.verifyInArchive(inArchive);
+
+        assertEquals(Boolean.FALSE, inArchive.getArchiveProperty(PropID.SOLID));
+        int countOfFiles = 0;
+        for (int i = 0; i < inArchive.getNumberOfItems(); i++) {
+            if (Boolean.TRUE.equals(inArchive.getProperty(i, PropID.IS_FOLDER))) {
+                continue;
+            }
+            countOfFiles++;
+            // 7-Zip prints a power-of-two dictionary size as its exponent: 2^16 bytes.
+            assertEquals("LZMA2:16", inArchive.getProperty(i, PropID.METHOD));
+        }
+        assertEquals(Integer.valueOf(countOfFiles), inArchive.getArchiveProperty(PropID.NUM_BLOCKS));
     }
 
     Date substructDate(Date date, int day) {

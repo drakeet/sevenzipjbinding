@@ -45,6 +45,7 @@ public class OutArchiveImpl<T extends IOutItemBase> implements IOutArchive<T> {
     private Boolean headerEncryption;
     private int compressionLevel = -1;
     private int threadCount = -1;
+    private long dictionarySize = -1;
     private PrintStream tracePrintStream;
     private boolean trace; // Read by native code
     private boolean closed;
@@ -65,6 +66,13 @@ public class OutArchiveImpl<T extends IOutItemBase> implements IOutArchive<T> {
         this.threadCount = threadCount;
     }
 
+    protected void featureSetDictionarySize(long dictionarySize) {
+        if (dictionarySize != -1 && dictionarySize <= 0) {
+            throw new IllegalArgumentException("Dictionary size must be positive or -1 (default): " + dictionarySize);
+        }
+        this.dictionarySize = dictionarySize;
+    }
+
     protected void applyFeatures() throws SevenZipException {
         applyFeatures(null, false);
     }
@@ -82,9 +90,12 @@ public class OutArchiveImpl<T extends IOutItemBase> implements IOutArchive<T> {
         if (headerEncryption != null) {
             headerEncryptionValue = headerEncryption.booleanValue() ? 1 : 0;
         }
-        if (compressionLevel != -1 || headerEncryptionValue != -1 || threadCount >= 0 || solidBlockSpecDefined) {
+        // The 'b' suffix makes 7-Zip read the value as bytes. A plain number would be read as a power of two.
+        String dictionarySizeSpec = dictionarySize == -1 ? null : dictionarySize + "b";
+        if (compressionLevel != -1 || headerEncryptionValue != -1 || threadCount >= 0 || solidBlockSpecDefined
+                || dictionarySizeSpec != null) {
             nativeSetProperties(compressionLevel, headerEncryptionValue, threadCount, solidBlockSpec,
-                    solidBlockSpecDefined);
+                    solidBlockSpecDefined, dictionarySizeSpec);
         }
     }
 
@@ -100,7 +111,7 @@ public class OutArchiveImpl<T extends IOutItemBase> implements IOutArchive<T> {
     }
 
     private native void nativeSetProperties(int compressionLevel, int headerEncryption, int threadCount,
-            String solidBlockSpec, boolean solidBlockSpecDefined) throws SevenZipException;
+            String solidBlockSpec, boolean solidBlockSpecDefined, String dictionarySizeSpec) throws SevenZipException;
 
     private native void nativeUpdateItems(ISequentialOutStream outStream, int numberOfItems,
             Object archiveUpdateCallback) throws SevenZipException;

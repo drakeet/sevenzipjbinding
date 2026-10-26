@@ -85,11 +85,11 @@ JBINDING_JNIEXPORT void JNICALL Java_net_sf_sevenzipjbinding_impl_OutArchiveImpl
 /*
  * Class:     net_sf_sevenzipjbinding_impl_OutArchiveImpl
  * Method:    nativeSetProperties
- * Signature: (IIILjava/lang/String;Z)V
+ * Signature: (IIILjava/lang/String;ZLjava/lang/String;)V
  */
 JNIEXPORT void JNICALL Java_net_sf_sevenzipjbinding_impl_OutArchiveImpl_nativeSetProperties
   (JNIEnv * env, jobject thiz, jint compressionLevel, jint headerEncryption, jint threadCount,
-   jstring solidSpec, jboolean solidSpecDefined) {
+   jstring solidSpec, jboolean solidSpecDefined, jstring dictionarySizeSpec) {
     TRACE("OutArchiveImpl::nativeSetProperties(). ThreadID=" << PlatformGetCurrentThreadId());
 
     JBindingSession & jbindingSession = GetJBindingSession(env, thiz);
@@ -112,8 +112,8 @@ JNIEXPORT void JNICALL Java_net_sf_sevenzipjbinding_impl_OutArchiveImpl_nativeSe
         return;
     }
 
-    const wchar_t *names[4];
-    NWindows::NCOM::CPropVariant propValues[4];
+    const wchar_t *names[5];
+    NWindows::NCOM::CPropVariant propValues[5];
     UInt32 size = 0;
 
     if (compressionLevel != -1) {
@@ -140,6 +140,11 @@ JNIEXPORT void JNICALL Java_net_sf_sevenzipjbinding_impl_OutArchiveImpl_nativeSe
         } else {
             propValues[size++] = UString(FromJChar(env, solidSpec));
         }
+    }
+    if (dictionarySizeSpec != NULL) {
+        // "0d": dictionary size of the first (main) compression method.
+        names[size] = L"0d";
+        propValues[size++] = UString(FromJChar(env, dictionarySizeSpec));
     }
 
     result = setProperties->SetProperties(names, propValues, size);
