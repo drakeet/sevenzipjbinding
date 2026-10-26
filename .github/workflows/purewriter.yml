@@ -6,9 +6,13 @@ name: Pure Writer desktop artifacts
 # solid mode off, extract it again byte for byte, and check the format with py7zr. The macOS jar is smoke tested with
 # an arm64 JVM and with an x86_64 JVM under Rosetta 2.
 #
-# Manual only, read-only token, no secrets; actions are pinned to commit SHAs.
+# Runs on pushes to the purewriter-* release branches and pw-* tags, or manually. Read-only token, no secrets;
+# actions are pinned to commit SHAs.
 on:
   workflow_dispatch:
+  push:
+    branches: ['purewriter-*']
+    tags: ['pw-*']
 
 permissions:
   contents: read
