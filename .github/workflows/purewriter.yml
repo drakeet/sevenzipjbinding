@@ -1,0 +1,182 @@
+name: Pure Writer desktop artifacts
+
+# Builds the platform jars that Pure Writer desktop ships: one universal macOS jar (x86_64 + arm64 in a single
+# "Mac" platform, as upstream does) and a Windows x64 jar built with MinGW-w64. Every job runs a smoke test with the
+# jars it built (.github/purewriter/smoke.py): compress a multi-member archive with level 5, a 1 MiB dictionary and
+# solid mode off, extract it again byte for byte, and check the format with py7zr. The macOS jar is smoke tested with
+# an arm64 JVM and with an x86_64 JVM under Rosetta 2.
+#
+# Manual only, read-only token, no secrets; actions are pinned to commit SHAs.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    name: macOS universal (x86_64 + arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # CMake 3.x: the project still sets policies that CMake 4 no longer supports.
+      - name: Install CMake and py7zr
+        run: python -m pip install cmake==3.28.4 py7zr==1.0.0
+
+      - name: Install Rosetta 2 (x86_64 smoke test)
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up x86_64 JDK 17 (smoke test under Rosetta)
+        id: jdk-x64
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          architecture: x64
+
+      - name: Set up arm64 JDK 17
+        id: jdk-arm64
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          architecture: aarch64
+
+      - name: Build universal dylib and jars
+        env:
+          JDK: ${{ steps.jdk-arm64.outputs.path }}
+        run: |
+          set -eux
+          cmake --version | head -1
+          clang --version | head -1
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=FALSE -DBUILD_TESTING=OFF \
+            -DJAVA_SYSTEM=Mac "-DJAVA_ARCH=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+            -DJAVA_JDK="$JDK"
+          cmake --build build --parallel 3
+          lipo -verify_arch x86_64 arm64 build/jbinding-cpp/lib7-Zip-JBinding.dylib
+          vtool -show-build build/jbinding-cpp/lib7-Zip-JBinding.dylib
+          unzip -l build/sevenzipjbinding-Mac.jar
+
+      - name: Smoke test with arm64 JVM and x86_64 JVM
+        env:
+          JDK_ARM64: ${{ steps.jdk-arm64.outputs.path }}
+          JDK_X64: ${{ steps.jdk-x64.outputs.path }}
+        run: |
+          set -eux
+          mkdir -p smoke/classes
+          "$JDK_ARM64/bin/javac" --release 8 -cp build/jbinding-java/sevenzipjbinding.jar -d smoke/classes \
+            .github/purewriter/PureWriterSmoke.java
+          classpath="smoke/classes:build/jbinding-java/sevenzipjbinding.jar:build/sevenzipjbinding-Mac.jar"
+          python .github/purewriter/smoke.py --java "$JDK_ARM64/bin/java" --classpath "$classpath" \
+            --work smoke/arm64 --expect-arch aarch64 --report smoke/mac-arm64.json
+          python .github/purewriter/smoke.py --java "$JDK_X64/bin/java" --classpath "$classpath" \
+            --work smoke/x86_64 --expect-arch x86_64 --report smoke/mac-x86_64.json
+
+      - name: Collect artifacts
+        run: |
+          set -eux
+          mkdir dist
+          cp build/jbinding-java/sevenzipjbinding.jar build/sevenzipjbinding-Mac.jar dist/
+          cd dist
+          shasum -a 256 *.jar > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-mac
+          path: dist/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-mac
+          path: smoke/*.json
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64 (MinGW-w64)
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install CMake and py7zr
+        run: python -m pip install cmake==3.28.4 py7zr==1.0.0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          architecture: x64
+
+      - name: Set up MinGW-w64
+        id: msys2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja
+
+      - name: Build DLL and jars
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          set -eux
+          export PATH="$(cygpath -u "$MSYS2_LOCATION")/mingw64/bin:$PATH"
+          cmake --version | head -1
+          gcc --version | head -1
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DMINGW64=Yes \
+            -DJAVA_SYSTEM=Windows -DJAVA_ARCH=amd64 -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DJAVA_JDK="$JAVA_HOME"
+          cmake --build build --parallel 4
+          objdump -p build/jbinding-cpp/lib7-Zip-JBinding.dll | grep "DLL Name" | tee build/dll-imports.txt
+          # The DLL must not need the MinGW runtime DLLs: users do not have them.
+          if grep -qiE "libgcc|libstdc|libwinpthread" build/dll-imports.txt; then exit 1; fi
+          unzip -l build/sevenzipjbinding-Windows-amd64.jar
+
+      - name: Smoke test
+        run: |
+          set -eux
+          mkdir -p smoke/classes
+          "$JAVA_HOME/bin/javac" --release 8 -cp build/jbinding-java/sevenzipjbinding.jar -d smoke/classes \
+            .github/purewriter/PureWriterSmoke.java
+          classpath="smoke/classes;build/jbinding-java/sevenzipjbinding.jar;build/sevenzipjbinding-Windows-amd64.jar"
+          python .github/purewriter/smoke.py --java "$JAVA_HOME/bin/java" --classpath "$classpath" \
+            --work smoke/windows --expect-arch amd64 --report smoke/windows-amd64.json
+
+      - name: Collect artifacts
+        run: |
+          set -eux
+          mkdir dist
+          cp build/jbinding-java/sevenzipjbinding.jar build/sevenzipjbinding-Windows-amd64.jar dist/
+          cd dist
+          sha256sum *.jar > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-windows-amd64
+          path: dist/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-windows
+          path: smoke/*.json
+          if-no-files-found: error
