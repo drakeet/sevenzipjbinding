@@ -74,7 +74,7 @@ jobs:
             -DJAVA_SYSTEM=Mac "-DJAVA_ARCH=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
             -DJAVA_JDK="$JDK"
           cmake --build build --parallel 3
-          lipo -verify_arch x86_64 arm64 build/jbinding-cpp/lib7-Zip-JBinding.dylib
+          lipo build/jbinding-cpp/lib7-Zip-JBinding.dylib -verify_arch x86_64 arm64
           vtool -show-build build/jbinding-cpp/lib7-Zip-JBinding.dylib
           unzip -l build/sevenzipjbinding-Mac.jar
 
@@ -159,9 +159,11 @@ jobs:
           # vtables of 7-Zip classes whose methods are not linked into the library (COpenCallbackImp,
           # CArchiveExtractCallback from the 7-Zip UI headers), which fails to link with "undefined reference to
           # vtable".
+          # -static: STATIC_BUILD only links libgcc and libstdc++ statically; libwinpthread would stay a DLL.
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DMINGW64=Yes \
             -DJAVA_SYSTEM=Windows -DJAVA_ARCH=amd64 -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
-            -DCMAKE_CXX_FLAGS=-fno-devirtualize-speculatively -DJAVA_JDK="$JAVA_HOME"
+            -DCMAKE_CXX_FLAGS=-fno-devirtualize-speculatively -DCMAKE_SHARED_LINKER_FLAGS=-static \
+            -DJAVA_JDK="$JAVA_HOME"
           cmake --build build --parallel 4
           objdump -p build/jbinding-cpp/lib7-Zip-JBinding.dll | grep "DLL Name" | tee build/dll-imports.txt
           # The DLL must not need the MinGW runtime DLLs: users do not have them.
