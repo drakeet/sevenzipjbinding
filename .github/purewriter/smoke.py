@@ -7,7 +7,8 @@ then checks the archive with py7zr, an independent reader: every block is LZMA2 
 choose a smaller one for a member smaller than the dictionary), the archive is not solid, there is one block per
 non-empty member, and py7zr extracts every member byte for byte.
 
-Usage: smoke.py --java <java> --classpath <classpath> --work <directory> --expect-arch <os.arch> [--report <json>]
+Usage: smoke.py --java <java> --classpath <classpath> --work <directory> --expect-arch <os.arch>
+                --expect-platform <platform> [--report <json>]
 """
 import argparse
 import json
@@ -86,6 +87,8 @@ def main():
     parser.add_argument("--classpath", required=True)
     parser.add_argument("--work", required=True, type=Path)
     parser.add_argument("--expect-arch", required=True, help="os.arch the JVM must report, e.g. x86_64 under Rosetta")
+    parser.add_argument("--expect-platform", required=True,
+                        help="platform 7-Zip-JBinding must pick from the platform jar, e.g. Mac-arm64")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
 
@@ -96,7 +99,9 @@ def main():
     output = subprocess.run([args.java, "-cp", args.classpath, "PureWriterSmoke", str(inputs), str(archive),
                              str(args.work / "extracted-jbinding")], check=True, capture_output=True, text=True)
     print(output.stdout, end="")
-    assert f" os.arch={args.expect_arch} " in output.stdout.splitlines()[0], output.stdout
+    first_line = output.stdout.splitlines()[0]
+    assert first_line.startswith(f"platform={args.expect_platform} "), output.stdout
+    assert f" os.arch={args.expect_arch} " in first_line, output.stdout
     result = check(archive, members, args.work / "extracted-py7zr")
     result.update(archive_bytes=archive.stat().st_size, jbinding_output=output.stdout.splitlines())
     print(json.dumps(result, indent=2))

@@ -1,11 +1,12 @@
 name: Pure Writer desktop artifacts
 
 # Builds the platform jars that Pure Writer desktop ships: one macOS jar per architecture (x86_64 and arm64, each
-# with a single-architecture dylib; CMake names the platform "Mac" either way) and a Windows x64 jar built with
-# MinGW-w64. All of them are shipped with one Java jar, the one built for macOS arm64, and every platform jar is smoke
-# tested together with it (.github/purewriter/smoke.py): compress a multi-member archive with level 5, a 1 MiB
-# dictionary and solid mode off, extract it again byte for byte, and check the format with py7zr. The arm64 jar runs
-# with an arm64 JVM, the x86_64 jar with an x86_64 JVM under Rosetta 2.
+# with a single-architecture dylib; CMake names the platforms "Mac-x86_64" and "Mac-arm64") and a Windows x64 jar built
+# with MinGW-w64. All of them are shipped with one Java jar, the one built for macOS arm64, and every platform jar is
+# smoke tested together with it (.github/purewriter/smoke.py): compress a multi-member archive with level 5, a 1 MiB
+# dictionary and solid mode off, extract it again byte for byte, and check the format with py7zr. The smoke test also
+# checks that 7-Zip-JBinding picks the expected platform. The arm64 jar runs with an arm64 JVM, the x86_64 jar with an
+# x86_64 JVM under Rosetta 2.
 #
 # Runs on pushes to the purewriter-* release branches and pw-* tags, or manually. Read-only token, no secrets;
 # actions are pinned to commit SHAs.
@@ -21,7 +22,7 @@ permissions:
 jobs:
   mac:
     name: macOS x86_64 and arm64
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,7 +81,7 @@ jobs:
             cmake --build "build-$arch" --parallel 3
             test "$(lipo -archs "build-$arch/jbinding-cpp/lib7-Zip-JBinding.dylib")" = "$arch"
             vtool -show-build "build-$arch/jbinding-cpp/lib7-Zip-JBinding.dylib"
-            unzip -l "build-$arch/sevenzipjbinding-Mac.jar"
+            unzip -l "build-$arch/sevenzipjbinding-Mac-$arch.jar"
           done
 
       - name: Smoke test, arm64 with arm64 JVM and x86_64 with x86_64 JVM
@@ -93,18 +94,18 @@ jobs:
           mkdir -p smoke/classes
           "$JDK_ARM64/bin/javac" --release 8 -cp "$java_jar" -d smoke/classes .github/purewriter/PureWriterSmoke.java
           python .github/purewriter/smoke.py --java "$JDK_ARM64/bin/java" \
-            --classpath "smoke/classes:$java_jar:build-arm64/sevenzipjbinding-Mac.jar" \
-            --work smoke/arm64 --expect-arch aarch64 --report smoke/mac-arm64.json
+            --classpath "smoke/classes:$java_jar:build-arm64/sevenzipjbinding-Mac-arm64.jar" \
+            --work smoke/arm64 --expect-arch aarch64 --expect-platform Mac-arm64 --report smoke/mac-arm64.json
           python .github/purewriter/smoke.py --java "$JDK_X64/bin/java" \
-            --classpath "smoke/classes:$java_jar:build-x86_64/sevenzipjbinding-Mac.jar" \
-            --work smoke/x86_64 --expect-arch x86_64 --report smoke/mac-x86_64.json
+            --classpath "smoke/classes:$java_jar:build-x86_64/sevenzipjbinding-Mac-x86_64.jar" \
+            --work smoke/x86_64 --expect-arch x86_64 --expect-platform Mac-x86_64 --report smoke/mac-x86_64.json
 
       - name: Collect artifacts
         run: |
           set -eux
           for arch in x86_64 arm64; do
             mkdir -p "dist/$arch"
-            cp build-arm64/jbinding-java/sevenzipjbinding.jar "build-$arch/sevenzipjbinding-Mac.jar" "dist/$arch/"
+            cp build-arm64/jbinding-java/sevenzipjbinding.jar "build-$arch/sevenzipjbinding-Mac-$arch.jar" "dist/$arch/"
             (cd "dist/$arch" && shasum -a 256 *.jar > SHA256SUMS && cat SHA256SUMS)
           done
 
@@ -198,7 +199,7 @@ jobs:
             .github/purewriter/PureWriterSmoke.java
           classpath="smoke/classes;mac-arm64/sevenzipjbinding.jar;build/sevenzipjbinding-Windows-amd64.jar"
           python .github/purewriter/smoke.py --java "$JAVA_HOME/bin/java" --classpath "$classpath" \
-            --work smoke/windows --expect-arch amd64 --report smoke/windows-amd64.json
+            --work smoke/windows --expect-arch amd64 --expect-platform Windows-amd64 --report smoke/windows-amd64.json
 
       - name: Collect artifacts
         run: |
