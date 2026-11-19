@@ -103,6 +103,8 @@ public class OutArchiveImpl<T extends IOutItemBase> implements IOutArchive<T> {
         // 7-Zip keeps the properties until the next call. If an earlier operation on this archive object sent some,
         // an empty property list is still needed to reset them to the defaults.
         if (anyPropertySet || propertiesApplied) {
+            // A failing call may still have applied the properties before the rejected one
+            propertiesApplied = true;
             nativeSetProperties(compressionLevel, headerEncryptionValue, threadCount, solidBlockSpec,
                     solidBlockSpecDefined, dictionarySizeSpec);
             propertiesApplied = anyPropertySet;

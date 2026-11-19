@@ -295,6 +295,33 @@ public class StandaloneCompressSevenZipTest extends JUnitNativeTestBase<VoidCont
         assertEquals(Integer.valueOf(1), secondArchive.getArchiveProperty(PropID.NUM_BLOCKS));
     }
 
+    @Test
+    public void testDefaultsAfterRejectedProperties() throws Exception {
+        virtualContent = new VirtualContent(new VirtualContentConfiguration());
+        virtualContent.fillRandomly(2, 1, 1, 1000, 500, null, false);
+
+        IOutCreateArchive7z outArchive = closeLater(SevenZip.openOutArchive7z());
+        outArchive.setLevel(0);
+        outArchive.setSolidFiles(-2); // "-2F": rejected by 7-Zip after it has applied the level
+        try {
+            outArchive.createArchive(new ByteArrayStream(100000), virtualContent.getItemCount(),
+                    callbackTesterCreateArchive.getProxyInstance());
+            fail("Invalid solid spec accepted");
+        } catch (SevenZipException expected) {
+        }
+
+        // Back to the defaults: compressed with LZMA2, not stored as with level 0
+        outArchive.setLevel(-1);
+        outArchive.setSolidFiles(-1);
+        IInArchive inArchive = createAndOpen(outArchive, new ByteArrayStream(100000));
+        for (int i = 0; i < inArchive.getNumberOfItems(); i++) {
+            if (!Boolean.TRUE.equals(inArchive.getProperty(i, PropID.IS_FOLDER))) {
+                String method = (String) inArchive.getProperty(i, PropID.METHOD);
+                assertTrue(method, method.startsWith("LZMA2"));
+            }
+        }
+    }
+
     private IInArchive createAndOpen(IOutCreateArchive7z outArchive, ByteArrayStream byteArrayStream)
             throws Exception {
         outArchive.createArchive(byteArrayStream, virtualContent.getItemCount(),
