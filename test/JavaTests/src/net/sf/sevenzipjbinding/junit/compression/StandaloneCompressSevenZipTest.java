@@ -211,6 +211,25 @@ public class StandaloneCompressSevenZipTest extends JUnitNativeTestBase<VoidCont
         }
     }
 
+    @Test
+    public void testDefaultsAfterReusingArchiveObject() throws Exception {
+        virtualContent = new VirtualContent(new VirtualContentConfiguration());
+        virtualContent.fillRandomly(3, 1, 1, 100000, 50000, null, false);
+
+        IOutCreateArchive7z outArchive = closeLater(SevenZip.openOutArchive7z());
+        outArchive.setDictionarySize(1 << 16);
+        outArchive.setSolid(false);
+        IInArchive firstArchive = createAndOpen(outArchive, new ByteArrayStream(1000000));
+        assertEquals(Integer.valueOf(3), firstArchive.getArchiveProperty(PropID.NUM_BLOCKS));
+
+        // Back to the defaults: the second archive must not get the properties of the first one
+        outArchive.setDictionarySize(-1);
+        outArchive.setSolid(true);
+        IInArchive secondArchive = createAndOpen(outArchive, new ByteArrayStream(1000000));
+        assertEquals(Boolean.TRUE, secondArchive.getArchiveProperty(PropID.SOLID));
+        assertEquals(Integer.valueOf(1), secondArchive.getArchiveProperty(PropID.NUM_BLOCKS));
+    }
+
     private IInArchive createAndOpen(IOutCreateArchive7z outArchive, ByteArrayStream byteArrayStream)
             throws Exception {
         outArchive.createArchive(byteArrayStream, virtualContent.getItemCount(),
