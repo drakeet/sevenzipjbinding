@@ -92,8 +92,12 @@ public class OutArchiveImpl<T extends IOutItemBase> implements IOutArchive<T> {
         if (headerEncryption != null) {
             headerEncryptionValue = headerEncryption.booleanValue() ? 1 : 0;
         }
-        // The 'b' suffix makes 7-Zip read the value as bytes. A plain number would be read as a power of two.
-        String dictionarySizeSpec = dictionarySize == -1 ? null : dictionarySize + "b";
+        String dictionarySizeSpec = null;
+        // Level 0 means no compression (Copy). With a dictionary size 7-Zip would compress with LZMA2 instead.
+        if (dictionarySize != -1 && compressionLevel != 0) {
+            // The 'b' suffix makes 7-Zip read the value as bytes. A plain number would be read as a power of two.
+            dictionarySizeSpec = dictionarySize + "b";
+        }
         boolean anyPropertySet = compressionLevel != -1 || headerEncryptionValue != -1 || threadCount >= 0
                 || solidBlockSpecDefined || dictionarySizeSpec != null;
         // 7-Zip keeps the properties until the next call. If an earlier operation on this archive object sent some,

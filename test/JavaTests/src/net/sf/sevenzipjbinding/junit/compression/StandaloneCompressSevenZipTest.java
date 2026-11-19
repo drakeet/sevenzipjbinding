@@ -7,6 +7,7 @@ import static org.junit.Assert.fail;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
+import java.util.Random;
 
 import org.junit.Test;
 
@@ -16,6 +17,7 @@ import net.sf.sevenzipjbinding.IInArchive;
 import net.sf.sevenzipjbinding.IOutCreateArchive7z;
 import net.sf.sevenzipjbinding.IOutCreateCallback;
 import net.sf.sevenzipjbinding.IOutItem7z;
+import net.sf.sevenzipjbinding.IOutUpdateArchive7z;
 import net.sf.sevenzipjbinding.ISequentialInStream;
 import net.sf.sevenzipjbinding.PropID;
 import net.sf.sevenzipjbinding.SevenZip;
@@ -170,15 +172,78 @@ public class StandaloneCompressSevenZipTest extends JUnitNativeTestBase<VoidCont
         // Every file is larger than the dictionary, so 7-Zip has no reason to use a smaller one.
         virtualContent.fillRandomly(3, 1, 1, 300000, 50000, null, false);
 
-        ByteArrayStream byteArrayStream = new ByteArrayStream(1000000);
         IOutCreateArchive7z outArchive = closeLater(SevenZip.openOutArchive7z());
 
-        // Not a power of two: 7-Zip must read the value as bytes, not as an exponent.
+        // The only setting, and not a power of two: 7-Zip must read the value as bytes, not as an exponent.
         outArchive.setDictionarySize(3 << 16);
-        outArchive.setSolid(false);
 
-        IInArchive inArchive = createAndOpen(outArchive, byteArrayStream);
+        IInArchive inArchive = createAndOpen(outArchive, new ByteArrayStream(2 * 1024 * 1024));
         assertMethodOfEachFile(inArchive, "LZMA2:192k");
+    }
+
+    @Test
+    public void testDictionarySizeIgnoredWithoutCompression() throws Exception {
+        virtualContent = new VirtualContent(new VirtualContentConfiguration());
+        virtualContent.fillRandomly(2, 1, 1, 1000, 500, null, false);
+
+        IOutCreateArchive7z outArchive = closeLater(SevenZip.openOutArchive7z());
+        outArchive.setDictionarySize(1 << 16);
+        outArchive.setLevel(0);
+
+        IInArchive inArchive = createAndOpen(outArchive, new ByteArrayStream(100000));
+        assertMethodOfEachFile(inArchive, "Copy");
+    }
+
+    @Test
+    public void testDictionarySizeOnUpdate() throws Exception {
+        virtualContent = new VirtualContent(new VirtualContentConfiguration());
+        virtualContent.fillRandomly(2, 1, 1, 300000, 50000, null, false);
+
+        IOutCreateArchive7z outArchive = closeLater(SevenZip.openOutArchive7z());
+        outArchive.setDictionarySize(1 << 16);
+        outArchive.setSolid(false);
+        IInArchive inArchive = createAndOpen(outArchive, new ByteArrayStream(2 * 1024 * 1024));
+
+        // Add a file with another dictionary size. The blocks of the existing files are copied as they are.
+        final int oldItemCount = inArchive.getNumberOfItems();
+        final byte[] newFileContent = new byte[300000];
+        Random random = new Random(0);
+        for (int i = 0; i < newFileContent.length; i++) {
+            newFileContent[i] = (byte) ('a' + random.nextInt(26));
+        }
+        IOutUpdateArchive7z outUpdateArchive = inArchive.getConnectedOutArchive7z();
+        outUpdateArchive.setDictionarySize(3 << 16);
+        outUpdateArchive.setSolid(false);
+        ByteArrayStream updatedArchiveStream = new ByteArrayStream(2 * 1024 * 1024);
+        outUpdateArchive.updateItems(updatedArchiveStream, oldItemCount + 1, new OutCreateArchive7z() {
+            @Override
+            public IOutItem7z getItemInformation(int index, OutItemFactory<IOutItem7z> outItemFactory)
+                    throws SevenZipException {
+                if (index < oldItemCount) {
+                    return outItemFactory.createOutItem(index);
+                }
+                IOutItem7z outItem = outItemFactory.createOutItem();
+                outItem.setDataSize((long) newFileContent.length);
+                outItem.setPropertyPath("new-file");
+                return outItem;
+            }
+
+            @Override
+            public ISequentialInStream getStream(int index) throws SevenZipException {
+                return new ByteArrayStream(newFileContent, false);
+            }
+        });
+
+        updatedArchiveStream.rewind();
+        IInArchive updatedArchive = closeLater(SevenZip.openInArchive(ArchiveFormat.SEVEN_ZIP, updatedArchiveStream));
+        assertEquals(Integer.valueOf(3), updatedArchive.getArchiveProperty(PropID.NUM_BLOCKS));
+        for (int i = 0; i < updatedArchive.getNumberOfItems(); i++) {
+            if (Boolean.TRUE.equals(updatedArchive.getProperty(i, PropID.IS_FOLDER))) {
+                continue;
+            }
+            boolean newFile = "new-file".equals(updatedArchive.getProperty(i, PropID.PATH));
+            assertEquals(newFile ? "LZMA2:192k" : "LZMA2:16", updatedArchive.getProperty(i, PropID.METHOD));
+        }
     }
 
     @Test
