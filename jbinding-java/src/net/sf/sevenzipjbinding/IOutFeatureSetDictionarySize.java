@@ -18,7 +18,8 @@ public interface IOutFeatureSetDictionarySize {
      * <p>
      * A smaller dictionary needs less memory to compress and to extract, and with LZMA2 it also allows a single large
      * file to be split into more blocks that are compressed in parallel. 7-Zip may still use a smaller dictionary if
-     * the data to compress is smaller than the dictionary, and LZMA2 rounds other sizes than 2^n and 3*2^n bytes up.
+     * the data to compress is smaller than the dictionary. LZMA2 stores the size in the archive rounded up to 2^n or
+     * 3*2^n bytes, 4 KiB at least.
      * With compression level 0 (no compression) the dictionary size is ignored. A value that the compression method
      * does not support is reported as a {@link SevenZipException} by the operation that creates or updates the
      * archive.

@@ -237,13 +237,18 @@ public class StandaloneCompressSevenZipTest extends JUnitNativeTestBase<VoidCont
         updatedArchiveStream.rewind();
         IInArchive updatedArchive = closeLater(SevenZip.openInArchive(ArchiveFormat.SEVEN_ZIP, updatedArchiveStream));
         assertEquals(Integer.valueOf(3), updatedArchive.getArchiveProperty(PropID.NUM_BLOCKS));
+        int countOfNewFiles = 0;
         for (int i = 0; i < updatedArchive.getNumberOfItems(); i++) {
             if (Boolean.TRUE.equals(updatedArchive.getProperty(i, PropID.IS_FOLDER))) {
                 continue;
             }
             boolean newFile = "new-file".equals(updatedArchive.getProperty(i, PropID.PATH));
+            if (newFile) {
+                countOfNewFiles++;
+            }
             assertEquals(newFile ? "LZMA2:192k" : "LZMA2:16", updatedArchive.getProperty(i, PropID.METHOD));
         }
+        assertEquals(1, countOfNewFiles);
     }
 
     @Test
